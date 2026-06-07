@@ -12,7 +12,6 @@ env:
   GRADLE_VERSION: "8.5"
 
 jobs:
-  # ─── 单元测试 ───
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -30,14 +29,12 @@ jobs:
         uses: gradle/gradle-build-action@v2
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-read-only: false
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
 
       - run: ./gradlew testDebugUnitTest
 
-  # ─── Debug 构建 ───
   debug-build:
     name: Debug Build
     runs-on: ubuntu-latest
@@ -56,7 +53,6 @@ jobs:
         uses: gradle/gradle-build-action@v2
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-read-only: false
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
@@ -70,7 +66,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-  # ─── Release 构建 ───
   release:
     name: Release ${{ matrix.arch.name }}
     runs-on: ubuntu-latest
@@ -83,10 +78,8 @@ jobs:
         arch:
           - name: arm64-v8a
             abi_flag: -Pandroid.injected.build.abi=arm64-v8a
-            display: "ARM 64位"
           - name: armeabi-v7a
             abi_flag: -Pandroid.injected.build.abi=armeabi-v7a
-            display: "ARM 32位"
 
     steps:
       - uses: actions/checkout@v4
@@ -101,27 +94,36 @@ jobs:
         uses: gradle/gradle-build-action@v2
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-read-only: false
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
 
-      - name: Build Release APK - ${{ matrix.arch.display }}
+      - name: Build Release APK - ${{ matrix.arch.name }}
         run: ./gradlew assembleRelease ${{ matrix.arch.abi_flag }}
 
-      - name: Rename APK
+      - name: Find and Rename APK
         run: |
-          cp app/build/outputs/apk/release/*.apk \
-            ParkingBilling-${{ matrix.arch.name }}-release.apk
+          echo "=== Build output directory ==="
+          find app/build -name "*.apk" -type f 2>/dev/null || echo "No APK files found in app/build"
+          mkdir -p release-out
+          APK_FILE=$(find app/build -name "*.apk" -type f 2>/dev/null | head -1)
+          if [ -n "$APK_FILE" ]; then
+            cp "$APK_FILE" "release-out/ParkingBilling-${{ matrix.arch.name }}-release.apk"
+            echo "Copied: $APK_FILE → release-out/ParkingBilling-${{ matrix.arch.name }}-release.apk"
+          else
+            echo "ERROR: No APK found!"
+            find app/build -type d -maxdepth 5 2>/dev/null || echo "app/build directory structure:"
+            ls -la app/build/outputs/ 2>/dev/null || echo "No app/build/outputs directory"
+            exit 1
+          fi
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ParkingBilling-Release-${{ matrix.arch.name }}
-          path: ParkingBilling-${{ matrix.arch.name }}-release.apk
+          path: release-out/*.apk
           retention-days: 90
 
-  # ─── 打 Tag 发布到 Releases ───
   publish-release:
     name: Publish to Releases
     runs-on: ubuntu-latest
@@ -135,31 +137,23 @@ jobs:
         with:
           pattern: ParkingBilling-Release-*
           merge-multiple: true
+          path: release-apks
 
       - name: List APK files
-        run: ls -la *.apk
+        run: ls -la release-apks/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "停车计费系统 ${{ github.ref_name }}"
-          files: |
-            ParkingBilling-arm64-v8a-release.apk
-            ParkingBilling-armeabi-v7a-release.apk
+          files: release-apks/*.apk
           body: |
             ## 停车计费系统 ${{ github.ref_name }}
 
             ### APK 下载
-            | 文件 | 架构 | 适用设备 |
-            |------|------|----------|
-            | `ParkingBilling-arm64-v8a-release.apk` | arm64-v8a | 绝大多数现代安卓手机（推荐） |
-            | `ParkingBilling-armeabi-v7a-release.apk` | armeabi-v7a | 旧款 32 位安卓设备 |
-
-            ### 安装方式
-            1. 下载对应你手机架构的 APK
-            2. 在手机上打开文件安装
-            3. 如提示未知来源应用，请在设置中允许安装
+            - **ParkingBilling-arm64-v8a-release.apk** → ARM 64位（现代安卓手机，推荐）
+            - **ParkingBilling-armeabi-v7a-release.apk** → ARM 32位（旧款设备）
 
             ### 计费规则
             - 1小时内免费
