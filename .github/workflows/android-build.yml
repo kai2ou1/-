@@ -2,60 +2,16 @@ name: Android CI Build
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
 env:
-  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g"
   JAVA_VERSION: "17"
   GRADLE_VERSION: "8.5"
 
 jobs:
-  # ─── 代码检查 ───
-  lint:
-    name: Lint Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-disabled: true
-
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - run: ./gradlew lint
-
-      - name: Upload Lint Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lint-report
-          path: app/build/reports/lint*
-          retention-days: 14
-
   # ─── 单元测试 ───
   test:
     name: Unit Tests
@@ -71,56 +27,66 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/gradle-build-action@v2
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-disabled: true
+          cache-read-only: false
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
       - run: ./gradlew testDebugUnitTest
 
-      - name: Upload Test Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: unit-test-report
-          path: app/build/reports/tests
-          retention-days: 14
-
-  # ─── 多架构编译 ───
-  build:
-    name: Build ${{ matrix.arch.name }}
+  # ─── Debug 构建 ───
+  debug-build:
+    name: Debug Build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [lint]
+    timeout-minutes: 20
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: false
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
+
+      - run: ./gradlew assembleDebug
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ParkingBilling-debug-universal
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+  # ─── Release 构建 ───
+  release:
+    name: Release ${{ matrix.arch.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [debug-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
         arch:
-          - name: Universal
-            abi_flag: ""
-            display: "通用包 (all ABIs)"
           - name: arm64-v8a
             abi_flag: -Pandroid.injected.build.abi=arm64-v8a
             display: "ARM 64位"
           - name: armeabi-v7a
             abi_flag: -Pandroid.injected.build.abi=armeabi-v7a
             display: "ARM 32位"
-          - name: x86_64
-            abi_flag: -Pandroid.injected.build.abi=x86_64
-            display: "x86 64位 (模拟器)"
 
     steps:
       - uses: actions/checkout@v4
@@ -132,86 +98,74 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/gradle-build-action@v2
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-disabled: true
+          cache-read-only: false
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+      - name: Build Release APK - ${{ matrix.arch.display }}
+        run: ./gradlew assembleRelease ${{ matrix.arch.abi_flag }}
 
-      - name: Build APK - ${{ matrix.arch.display }}
+      - name: Rename APK
         run: |
-          if [ -z "${{ matrix.arch.abi_flag }}" ]; then
-            ./gradlew assembleDebug
-          else
-            ./gradlew assembleDebug ${{ matrix.arch.abi_flag }}
-          fi
+          cp app/build/outputs/apk/release/*.apk \
+            ParkingBilling-${{ matrix.arch.name }}-release.apk
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ParkingBilling-debug-${{ matrix.arch.name }}
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-  # ─── 发布版编译（仅推送到 main 时触发）───
-  release:
-    name: Release ${{ matrix.arch.name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [test, build]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - name: Universal
-            abi_flag: ""
-          - name: arm64-v8a
-            abi_flag: -Pandroid.injected.build.abi=arm64-v8a
-          - name: armeabi-v7a
-            abi_flag: -Pandroid.injected.build.abi=armeabi-v7a
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-disabled: true
-
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version=${{ env.GRADLE_VERSION }}
-
-      - name: Build Release APK - ${{ matrix.arch.name }}
-        run: |
-          if [ -z "${{ matrix.arch.abi_flag }}" ]; then
-            ./gradlew assembleRelease
-          else
-            ./gradlew assembleRelease ${{ matrix.arch.abi_flag }}
-          fi
-
-      - name: Upload Release APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ParkingBilling-Release-${{ matrix.arch.name }}
-          path: app/build/outputs/apk/release/*.apk
+          path: ParkingBilling-${{ matrix.arch.name }}-release.apk
           retention-days: 90
+
+  # ─── 打 Tag 发布到 Releases ───
+  publish-release:
+    name: Publish to Releases
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download All Release APKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ParkingBilling-Release-*
+          merge-multiple: true
+
+      - name: List APK files
+        run: ls -la *.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "停车计费系统 ${{ github.ref_name }}"
+          files: |
+            ParkingBilling-arm64-v8a-release.apk
+            ParkingBilling-armeabi-v7a-release.apk
+          body: |
+            ## 停车计费系统 ${{ github.ref_name }}
+
+            ### APK 下载
+            | 文件 | 架构 | 适用设备 |
+            |------|------|----------|
+            | `ParkingBilling-arm64-v8a-release.apk` | arm64-v8a | 绝大多数现代安卓手机（推荐） |
+            | `ParkingBilling-armeabi-v7a-release.apk` | armeabi-v7a | 旧款 32 位安卓设备 |
+
+            ### 安装方式
+            1. 下载对应你手机架构的 APK
+            2. 在手机上打开文件安装
+            3. 如提示未知来源应用，请在设置中允许安装
+
+            ### 计费规则
+            - 1小时内免费
+            - 4小时内收费5元
+            - 超过4小时后，每增加1小时加收2元（不足1小时按1小时算）
+            - 24小时内封顶20元
+          makeLatest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
