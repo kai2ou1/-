@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background circle -->
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
+    <!-- Parking P icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,38h8.5a6.5,6.5 0,0 1,0 13H48V38M48,38h8.5a6.5,6.5 0,0 1,0 13H48V38M44,34h14a8,8 0,0 1,0 16H44V34Z" />
+    <!-- Yuan sign ￥ -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,56l-6,10h12l-6,-10z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M42,62 L66,62" />
+</vector>

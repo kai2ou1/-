@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">停车计费系统</string>
+    <string name="title">停车计费</string>
+    <string name="entry_time_label">入场时间</string>
+    <string name="exit_time_label">出场时间</string>
+    <string name="calculate_btn">计算费用</string>
+    <string name="result_duration">停放时长</string>
+    <string name="result_fee">应收费用</string>
+    <string name="result_breakdown">费用明细</string>
+    <string name="fee_rule_free">1小时内免费</string>
+    <string name="fee_rule_base">基础费用（4小时内）</string>
+    <string name="fee_rule_extra">超时加收</string>
+    <string name="fee_rule_cap">封顶价（24小时）</string>
+    <string name="error_invalid_time">出场时间不能早于入场时间</string>
+    <string name="error_select_time">请选择完整的入场和出场时间</string>
+</resources>
