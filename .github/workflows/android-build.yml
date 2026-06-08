@@ -3,6 +3,7 @@ name: Android CI Build
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -12,6 +13,7 @@ env:
   GRADLE_VERSION: "8.5"
 
 jobs:
+  # ─── 单元测试 ───
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -35,6 +37,7 @@ jobs:
 
       - run: ./gradlew testDebugUnitTest
 
+  # ─── Debug 构建 ───
   debug-build:
     name: Debug Build
     runs-on: ubuntu-latest
@@ -66,12 +69,14 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
+  # ─── Release 构建 + 发布 ───
+  # 当推送 tag（如 v1.0.0）时触发：构建 arm64-v8a + armeabi-v7a 并发布到 Releases
   release:
     name: Release ${{ matrix.arch.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [debug-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -110,18 +115,15 @@ jobs:
       - name: Build Release APK - ${{ matrix.arch.name }}
         run: ./gradlew assembleRelease ${{ matrix.arch.abi_flag }}
 
-      - name: Find and Rename APK
+      - name: Rename APK
         run: |
-          echo "=== Build output ==="
-          find app/build -name "*.apk" -type f 2>/dev/null || echo "No APK found in app/build"
           mkdir -p release-out
           APK_FILE=$(find app/build -name "*.apk" -type f 2>/dev/null | head -1)
           if [ -n "$APK_FILE" ]; then
             cp "$APK_FILE" "release-out/ParkingBilling-${{ matrix.arch.name }}-release.apk"
-            echo "Copied: $APK_FILE → ParkingBilling-${{ matrix.arch.name }}-release.apk"
           else
             echo "ERROR: No APK found!"
-            find app/build -type d -maxdepth 6 2>/dev/null || echo "No app/build directory"
+            find app/build -type d -maxdepth 6
             exit 1
           fi
 
@@ -132,14 +134,13 @@ jobs:
           path: release-out/*.apk
           retention-days: 90
 
+  # ─── 汇总发布 ───
   publish-release:
     name: Publish to Releases
     runs-on: ubuntu-latest
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download All Release APKs
         uses: actions/download-artifact@v4
         with:
@@ -147,8 +148,10 @@ jobs:
           merge-multiple: true
           path: release-apks
 
-      - name: List APKs
-        run: ls -la release-apks/
+      - name: Verify APKs
+        run: |
+          ls -la release-apks/
+          echo "APK count: $(ls release-apks/*.apk 2>/dev/null | wc -l)"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
